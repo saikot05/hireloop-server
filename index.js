@@ -2,11 +2,10 @@ const express = require('express')
 const cors = require('cors');
 const app = express()
 const port = 5000
-require('dotenv').config()
+require('dotenv').config();
 
 app.use(cors());
 app.use(express.json());
-
 
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 
@@ -16,7 +15,9 @@ app.get('/', (req, res) => {
 
 
 
+
 const uri = process.env.MONGO_DB_URI;
+
 // Create a MongoClient with a MongoClientOptions object to set the Stable API version
 const client = new MongoClient(uri, {
     serverApi: {
@@ -31,20 +32,21 @@ async function run() {
         // Connect the client to the server	(optional starting in v4.7)
         await client.connect();
 
+
         const database = client.db("hireloop_db");
         const jobCollection = database.collection("jobs");
         const companyCollection = database.collection("companies");
-        const userCollection = database.collection("users");
+        const usersCollection = database.collection("user");
         const applicationsCollection = database.collection("applications");
-        const planCollection = database.collection("plans");
-        const subscriptionCollection = database.collection("subscriptions");
+        const planCollection = database.collection('plans');
+        const subscriptionCollection = database.collection('subscriptions');
 
         app.get('/api/users', async(req, res) => {
-            const cursor = userCollection.find().skip(6);
+
+            const cursor = usersCollection.find();
             const result = await cursor.toArray();
             res.send(result);
         })
-
 
         app.get('/api/jobs', async(req, res) => {
             const query = {};
@@ -55,29 +57,30 @@ async function run() {
                 query.status = req.query.status;
             }
             const cursor = jobCollection.find(query);
-            const jobs = await cursor.toArray();
-            res.send(jobs);
+            const result = await cursor.toArray();
+            res.send(result);
         })
 
         app.get('/api/jobs/:id', async(req, res) => {
             const id = req.params.id;
-            const query = { _id: new ObjectId(id) };
-            const job = await jobCollection.findOne(query);
-            res.send(job || {});
-        })
-
-
-        app.post('/api/jobs', async(req, res) => {
-            const job = req.body;
-            const newjob = {
-                ...job,
-                createdAt: new Date()
+            const query = {
+                _id: new ObjectId(id)
             }
-            const result = await jobCollection.insertOne(newjob);
+            const result = await jobCollection.findOne(query);
             res.send(result);
         })
 
-        //application related api
+        app.post('/api/jobs', async(req, res) => {
+            const job = req.body;
+            const newJob = {
+                ...job,
+                createdAt: new Date()
+            }
+            const result = await jobCollection.insertOne(newJob);
+            res.send(result);
+        })
+
+        // application related apis
         app.get('/api/applications', async(req, res) => {
             const query = {};
             if (req.query.applicantId) {
@@ -96,17 +99,74 @@ async function run() {
             const newApplication = {
                 ...application,
                 createdAt: new Date()
-            };
+            }
             const result = await applicationsCollection.insertOne(newApplication);
             res.send(result);
         })
 
-        // company related api
+        // company related apis
+        // app.get('/api/companies', async (req, res) => {
+        //     const cursor = companyCollection.find().skip(4);
+        //     const result = await cursor.toArray();
+        //     res.send(result);
+        // })
+
+        // inefficient way to join/aggregate collection
         app.get('/api/companies', async(req, res) => {
-            const cursor = companyCollection.find();
+                const cursor = companyCollection.find();
+                const companies = await cursor.toArray();
+
+                for (const company of companies) {
+                    const filter = {
+                        companyId: company._id.toString()
+                    }
+                    const jobCount = await jobCollection.countDocuments(filter)
+                    company.jobCount = jobCount
+                }
+
+                res.send(companies);
+            })
+            // inefficient way to join/aggregate collection
+        app.get('/api/companies2', async(req, res) => {
+            const pipeline = [{
+                    $skip: 5
+                },
+                {
+                    $limit: 2
+                }
+            ];
+
+            const cursor = companyCollection.aggregate(pipeline);
+            const result = await cursor.toArray();
+            res.send(result)
+        })
+
+        app.get('/api/stats', async(req, res) => {
+            const pipeline = [{
+                    $group: {
+                        _id: '$jobType',
+                        count: {
+                            $sum: 1
+                        }
+                    }
+                },
+                {
+                    $project: {
+                        jobType: '$_id',
+                        _id: 0,
+                        count: 1
+                    }
+                },
+                {
+                    $sort: { count: 1 }
+                }
+            ]
+
+            const cursor = jobCollection.aggregate(pipeline);
             const result = await cursor.toArray();
             res.send(result);
         })
+
 
         app.get('/api/my/companies', async(req, res) => {
             const query = {};
@@ -114,6 +174,7 @@ async function run() {
                 query.recruiterId = req.query.recruiterId;
             }
             const result = await companyCollection.findOne(query);
+
             res.send(result || {});
         })
 
@@ -122,7 +183,7 @@ async function run() {
             const newCompany = {
                 ...company,
                 createdAt: new Date()
-            };
+            }
             const result = await companyCollection.insertOne(newCompany);
             res.send(result);
         })
@@ -130,54 +191,59 @@ async function run() {
         app.patch('/api/companies/:id', async(req, res) => {
             const id = req.params.id;
             const updatedCompany = req.body;
-            const filter = { _id: new ObjectId(id) };
-            const updateDoc = {
+            const filter = { _id: new ObjectId(id) }
+            const updatedDoc = {
                 $set: {
-                    status: updatedCompany.status,
-                },
-            };
-            const result = await companyCollection.updateOne(filter, updateDoc);
+                    status: updatedCompany.status
+                }
+            }
+            const result = await companyCollection.updateOne(filter, updatedDoc);
             res.send(result);
         })
 
-        // plan related api
+        // plans 
         app.get('/api/plans', async(req, res) => {
-            const query = {};
+            const query = {}
             if (req.query.plan_id) {
-                query.id = req.query.plan_id;
+                query.id = req.query.plan_id
             }
             const plan = await planCollection.findOne(query);
-            res.send(plan);
+            res.send(plan)
         })
 
-        // subscription related api
+        // subscription 
         app.post('/api/subscriptions', async(req, res) => {
             const data = req.body;
             const subsInfo = {
                 ...data,
                 createdAt: new Date()
             }
+
             const result = await subscriptionCollection.insertOne(subsInfo);
+
+            // update the user plan information
             const filter = { email: data.email };
+            // update the value of the 'quantity' field to 5
             const updateDocument = {
                 $set: {
                     plan: data.planId,
                 },
             };
-            const updateResult = await userCollection.updateOne(filter, updateDocument);
-            res.send({ result, updateResult });
-        });
 
+            const updateResult = await usersCollection.updateOne(filter, updateDocument);
+            res.send(updateResult)
+        })
 
         // Send a ping to confirm a successful connection
         await client.db("admin").command({ ping: 1 });
         console.log("Pinged your deployment. You successfully connected to MongoDB!");
     } finally {
         // Ensures that the client will close when you finish/error
-        //await client.close();
+        // await client.close();
     }
 }
 run().catch(console.dir);
+
 
 
 
